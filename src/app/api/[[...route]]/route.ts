@@ -26,8 +26,7 @@ app.get("/search", async (c) => {
       url: UPSTASH_REDIS_REST_URL,
     });
 
-    const q = c.req.query("q");
-    const query = q?.toUpperCase();
+    const query = c.req.query("q")?.toUpperCase();
 
     if (!query) {
       return c.json(
@@ -42,7 +41,7 @@ app.get("/search", async (c) => {
     const rank = await redis.zrank("terms", query);
 
     if (rank !== null && rank !== undefined) {
-      const temp = await redis.zrange<string[]>("terms", rank, rank + 50);
+      const temp = await redis.zrange<string[]>("terms", rank, rank + 150);
 
       for (const el of temp) {
         if (!el.startsWith(query)) {
@@ -59,7 +58,7 @@ app.get("/search", async (c) => {
     const end = performance.now();
     return c.json({
       result: res,
-      duration: end - start,
+      duration: (end - start).toFixed(2),
     });
   } catch (err) {
     console.error(err);
