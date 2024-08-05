@@ -1,14 +1,78 @@
-import { Hono } from 'hono'
-import { handle } from 'hono/vercel'
+import { Redis } from "@upstash/redis";
+import { Hono } from "hono";
+import { env } from "hono/adapter";
+import { handle } from "hono/vercel";
 
-export const runtime = 'edge'
+export const runtime = "edge";
 
-const app = new Hono().basePath('/api')
+const app = new Hono().basePath("/api");
 
-app.get('/search', (c) => {
-  return c.json({})
-})
+//for compatibility with claudfare workers
+type EnvConfig = {
+  UPSTASH_REDIS_REST_TOKEN: string;
+  UPSTASH_REDIS_REST_URL: string;
+};
 
-export const GET = handle(app)
+app.get("/search", async (c) => {
+  try {
+    //for compatibility with claudfare workers
+    const { UPSTASH_REDIS_REST_TOKEN, UPSTASH_REDIS_REST_URL } =
+      env<EnvConfig>(c);
 
-export default app as never
+    const start = performance.now();
+    // --------------------------------
+    const redis = new Redis({
+      token: UPSTASH_REDIS_REST_TOKEN,
+      url: UPSTASH_REDIS_REST_URL,
+    });
+
+    const q = c.req.query("q");
+    const query = q?.toUpperCase();
+
+    if (!query) {
+      return c.json(
+        {
+          message: "Invalid search query",
+        },
+        { status: 400 }
+      );
+    }
+
+    const res = [];
+    const rank = await redis.zrank("terms", query);
+
+    if (rank !== null && rank !== undefined) {
+      const temp = await redis.zrange<string[]>("terms", rank, rank + 50);
+
+      for (const el of temp) {
+        if (!el.startsWith(query)) {
+          break;
+        }
+
+        if (el.endsWith("*")) {
+          res.push(el.substring(0, el.length - 1));
+        }
+      }
+    }
+
+    //----------------------------
+    const end = performance.now();
+    return c.json({
+      result: res,
+      duration: end - start,
+    });
+  } catch (err) {
+    console.error(err);
+    return c.json(
+      {
+        results: [],
+        message: "Something went wrong",
+      },
+      { status: 500 }
+    );
+  }
+});
+
+export const GET = handle(app);
+
+export default app as never;
